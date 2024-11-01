@@ -1,0 +1,121 @@
+/* styles.css */
+
+.main-container {
+    -fx-background-color: #f5f5f5;
+}
+
+.header-label {
+    -fx-font-size: 24px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #2c3e50;
+}
+
+.section-label {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #34495e;
+}
+
+.url-container {
+    -fx-spacing: 10;
+    -fx-padding: 10;
+}
+
+.url-scroll-pane {
+    -fx-background-color: transparent;
+}
+
+.url-scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
+
+.url-field {
+    -fx-pref-width: 400px;
+}
+
+.custom-button {
+    -fx-padding: 8 15;
+    -fx-font-size: 14px;
+    -fx-cursor: hand;
+}
+
+.download-button {
+    -fx-background-color: #2ecc71;
+    -fx-text-fill: white;
+}
+
+.download-button:hover {
+    -fx-background-color: #27ae60;
+}
+
+.add-url-button {
+    -fx-background-color: #3498db;
+    -fx-text-fill: white;
+}
+
+.add-url-button:hover {
+    -fx-background-color: #2980b9;
+}
+
+.browse-button {
+    -fx-background-color: #f1c40f;
+    -fx-text-fill: white;
+}
+
+.browse-button:hover {
+    -fx-background-color: #f39c12;
+}
+
+.delete-button {
+    -fx-background-color: #e74c3c;
+    -fx-text-fill: white;
+}
+
+.delete-button:hover {
+    -fx-background-color: #c0392b;
+}
+
+.custom-progress-bar {
+    -fx-pref-height: 20;
+}
+
+.status-area {
+    -fx-background-insets: 0;
+    -fx-background-color: transparent; /* Sử dụng chỉ một màu trong thuộc tính này */
+    -fx-background-radius: 0;
+    -fx-box-border: none;
+}
+
+.status-container {
+    -fx-fill-width: true;
+}
+
+.url-row {
+    -fx-fill-width: true;
+}
+
+.info-label {
+    -fx-font-size: 14px;
+    -fx-text-fill: #7f8c8d;
+}
+
+.custom-alert {
+    -fx-background-color: white;
+}
+
+.custom-alert .header-panel {
+    -fx-background-color: #3498db;
+}
+
+.custom-alert .content {
+    -fx-padding: 15;
+}
+
+.pause-button {
+    -fx-background-color: orange; /* Màu nền */
+    -fx-text-fill: white; /* Màu chữ */
+    -fx-border-color: darkorange; /* Màu viền */
+    -fx-border-width: 1px; /* Độ dày viền */
+    -fx-font-size: 14px; /* Kích thước chữ */
+    -fx-padding: 10px; /* Đệm trong nút */
+}
