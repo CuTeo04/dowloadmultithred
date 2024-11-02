@@ -40,6 +40,12 @@ public class AdvancedDownloaderGUI extends Application {
         scene.getStylesheets().add(getClass().getResource("styles.css").toExternalForm());
         primaryStage.setScene(scene);
         primaryStage.show();
+        
+        //// note: hủy tải trước khi đóng ứng dụng
+        
+        primaryStage.setOnCloseRequest(event -> {
+            handleShutdown();
+        });
     }
 
     private VBox createMainLayout(Stage primaryStage) {
@@ -245,7 +251,7 @@ public class AdvancedDownloaderGUI extends Application {
                 TextField urlField = (TextField) urlRow.getChildren().get(1);
                 String url = urlField.getText().trim();
                 urlField.setEditable(false);
-                if (!url.isEmpty() && !info.getStartFlag()) {
+                if (!url.isEmpty() && !info.getStartStatus()) {
                     new Thread(() -> {
                         try {
                             info.setCurrentUrl(url);
@@ -265,7 +271,7 @@ public class AdvancedDownloaderGUI extends Application {
         downloads.forEach(info -> {
             HBox urlRow = info.getUrlRow();
             CheckBox checkBox = (CheckBox) urlRow.getChildren().get(0);
-            if (checkBox.isSelected() && info.getStartFlag() && info.getRunningFlag()) {
+            if (checkBox.isSelected() && info.getStartStatus() && info.getRunningFlag()) {
                 info.pause();
             }
         });
@@ -277,12 +283,19 @@ public class AdvancedDownloaderGUI extends Application {
         downloads.forEach(info -> {
             HBox urlRow = info.getUrlRow();
             CheckBox checkBox = (CheckBox) urlRow.getChildren().get(0);
-            if (checkBox.isSelected() && info.getStartFlag() && !info.getRunningFlag()) {
+            if (checkBox.isSelected() && info.getStartStatus() && !info.getRunningFlag()) {
                 info.resume();
             }
         });
     }
-
+    //////// note: hủy các file đang tải để tránh lỗi luồng
+    private void handleShutdown() {
+        downloads.forEach(info -> {
+            if (info.getStartStatus() && info.getRunningFlag()) {
+                info.cancelDownload(); 
+            }
+        });
+    }
     public static void main(String[] args) {
         launch(args);
     }
