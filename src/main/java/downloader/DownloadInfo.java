@@ -16,6 +16,10 @@ class DownloadInfo {
 		downloader.startDownload(currentUrl);
 	}
     
+    public boolean getStartStatus() {
+    	return downloader.getStartStatus();
+	}
+    
     public void pause() {
     	downloader.pauseDownload();
 	}
@@ -27,10 +31,6 @@ class DownloadInfo {
     
     public boolean getRunningFlag() {
     	return downloader.getRunningFlag();
-	}
-    
-    public boolean getStartFlag() {
-		return this.downloader.getStartFlag();
 	}
     
     public void cancelDownload() {

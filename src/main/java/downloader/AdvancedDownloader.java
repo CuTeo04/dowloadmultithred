@@ -1,9 +1,10 @@
 // executor: quản lí số luồng tối đa chạy cùng lúc = số luồng tải + luồng quan sát, áp dụng để hủy tất cả các luồng đang chạy
 // lock: cho phép nhiều luồng truy cập đến cùng một tài nguyên một cách an toàn
 // pauseCondition: cho phép điều khiển pause và resume các luồng
-// startFlag: cờ bắt đầu tải 
-// cancelFlag: cở để xử lí đảm bảo luồng sẽ dừng
+// start: startTime:thời gian bắt đầu tải, cờ bắt đầu tải 
 // runningFlag: cờ cho phép pause và resume
+// totalPauseTime: tổng thời gian tạm dừng
+// lastPauseTime: thời điểm tạm dừng cuối cùng
 
 package downloader; 
 
@@ -29,7 +30,7 @@ import org.apache.tika.Tika;
 
 
 public class AdvancedDownloader {
-	private static final int NUM_SEGMENTS = 10;
+	private static final int NUM_SEGMENTS = 4;
 	private static final DecimalFormat df = new DecimalFormat("#.##");
 	private static final int MAX_REDIRECTS = 5;
 	private static final int TORRENT_UPLOAD_RATE_LIMIT = 0;
@@ -37,9 +38,10 @@ public class AdvancedDownloader {
 	
 	private ProgressBar progressBar;   
 	private javafx.scene.control.TextArea statusArea;  
-	private  boolean startFlag;
 	private volatile boolean runningFlag; 
-	private volatile boolean cancelFlag;
+    private volatile double totalPauseTime;
+    private volatile double lastPauseTime;
+    private volatile double startTime;
 	private ExecutorService executor;
 	private final ReentrantLock lock;
     private final Condition pauseCondition;
@@ -49,9 +51,8 @@ public class AdvancedDownloader {
 			javafx.scene.control.TextArea statusArea) {
 		this.progressBar = progressBar;
 		this.statusArea = statusArea;
-		this.startFlag=false;
 		this.runningFlag=false;
-		this.cancelFlag=false;
+		this.startTime=0;
 		this.executor =Executors.newFixedThreadPool(NUM_SEGMENTS+1);
 		this.lock= new ReentrantLock();  
 		this.pauseCondition = lock.newCondition(); 
@@ -59,7 +60,7 @@ public class AdvancedDownloader {
 	
 	public void startDownload(String input) {  
 	    this.runningFlag = true; 
-	    this.startFlag=true;
+	    this.startTime= getCurrentTime();
 	    updateStatus("Start Downloading...");
 	    try {
 	        if (input.endsWith(".torrent")) {
@@ -80,14 +81,12 @@ public class AdvancedDownloader {
 	        updateStatus("Error occurred: " + e.getMessage());
 	        e.printStackTrace();
 	    } finally {
-	        this.startFlag = false; 
 	        this.runningFlag = false;
 	        executor.shutdown();
 	    }
 	}
 	
 	public void cancelDownload() {
-		this.cancelFlag=true;
 	    try {
 	        executor.shutdownNow(); 
 	    } catch (Exception e) { 
@@ -97,11 +96,14 @@ public class AdvancedDownloader {
 
 	
 	public void pauseDownload() {
-		this.runningFlag=false;
 		 updateStatus("Paused...");
+		this.lastPauseTime=getCurrentTime();
+		this.runningFlag=false;
 	}
 	
 	public void resumeDownload() {
+		updateStatus("Resumed...");
+		this.totalPauseTime += getCurrentTime() - this.lastPauseTime;
 		this.runningFlag=true;
 		lock.lock();
 	    try {
@@ -109,17 +111,17 @@ public class AdvancedDownloader {
 	    } finally {
 	        lock.unlock();
 	    }
-	    updateStatus("Resume...");
-	}
-	
-	public boolean getStartFlag() {
-		return this.startFlag;
 	}
 	
 	public boolean getRunningFlag() {
 		return this.runningFlag;
 	}
 	
+	
+	public boolean getStartStatus() {
+		if (this.startTime==0) return 
+			false; else return true;
+	}
 	private void downloadTorrent(String torrentPath) throws Exception {
 
 		File torrentFile = new File(torrentPath);
@@ -138,14 +140,13 @@ public class AdvancedDownloader {
 
 		Client client = new Client(InetAddress.getLocalHost(), torrent);
 
-		long startTime = System.currentTimeMillis();
 		AtomicLong lastDownloaded = new AtomicLong(0);
 
 		client.addObserver((o, arg) -> {
 			Client.ClientState state = client.getState();
 			float progress = client.getTorrent().getCompletion();
-			long currentTime = System.currentTimeMillis();
-			double elapsedTime = (currentTime - startTime) / 1000.0;
+			double currentTime = getCurrentTime();
+			double elapsedTime = (currentTime - this.startTime) / 1000.0;
 			long downloadedBytes = client.getTorrent().getDownloaded();
 			long deltaDownloaded = downloadedBytes - lastDownloaded.getAndSet(downloadedBytes);
 			double instantSpeed = deltaDownloaded / 1.0;
@@ -184,8 +185,6 @@ public class AdvancedDownloader {
 	            e.printStackTrace();
 	        }
 	    }
-
-	    long startTime = System.currentTimeMillis();
 	    AtomicLong totalBytesDownloaded = new AtomicLong(0);
 	    if (acceptRanges && fileSize > 0) {
 	        long segmentSize = fileSize / NUM_SEGMENTS;
@@ -201,7 +200,7 @@ public class AdvancedDownloader {
 	            // Thêm các luồng tải phân đoạn vào executor
 	            futures.add(executor.submit(() -> {
 	                try {
-	                    downloadSegment(fileUrl, startByte, endByte, outputFile, segmentNumber, totalBytesDownloaded, fileSize, startTime);
+	                    downloadSegment(fileUrl, startByte, endByte, outputFile, segmentNumber, totalBytesDownloaded, fileSize);
 	                } catch (IOException e) {
 	                    e.printStackTrace();
 	                    updateStatus("Error in downloading segment: " + e.getMessage());
@@ -210,16 +209,16 @@ public class AdvancedDownloader {
 	        }
 	        
 	        // Thêm luồng thông báo quá trình vào excutor
-	        executor.submit(() -> monitorObserver(totalBytesDownloaded, fileSize, startTime));
+	        executor.submit(() -> monitorObserver(totalBytesDownloaded, fileSize));
 	        // Hoàn tất xử lý các phân đoạn
-	        completeDownload(futures, fileSize, startTime);
+	        completeDownload(futures, fileSize);
 	    } else { // tải thông thường nếu không cho phép  tải phân đoạn 
 	        performSingleThreadDownload(connection, outputFile, totalBytesDownloaded);
 	    }
 	}
 
-	private void monitorObserver(AtomicLong totalBytesDownloaded, Long fileSize, Long startTime) {
-	    while (!cancelFlag)
+	private void monitorObserver(AtomicLong totalBytesDownloaded, Long fileSize) {
+	    while (!Thread.currentThread().isInterrupted())
 	    {
 	    	try {
 		        // Xử lý pause
@@ -238,9 +237,7 @@ public class AdvancedDownloader {
 		        }
 		        
 		        // thông báo tổng quan
-	            if (totalBytesDownloaded != null && fileSize != null && startTime != null) {
-		                updateOverallProgress(totalBytesDownloaded.get(), fileSize, startTime);
-		            }
+                updateOverallProgress(totalBytesDownloaded.get(), fileSize);
 	            
 		        // tạm nghỉ luồng monitorObserver
 		        Thread.sleep(3000);
@@ -251,18 +248,14 @@ public class AdvancedDownloader {
 		
 	}
 
-	private void completeDownload(List<Future<?>> futures, long fileSize, long startTime) throws IOException {
+	private void completeDownload(List<Future<?>> futures, long fileSize) throws IOException {
 	    try {
 	    	// future.get() : đợi một luồng chạy xong
 	    	 for (Future<?> future : futures) {
-	             // Kiểm tra nếu quá trình tải đã bị hủy
-	             if (cancelFlag) {
-	                 return; // Dừng hoàn tất tải
-	             }
-	             future.get();
+	    		 future.get();
 	         }
 	        // thông báo
-	        updateOverallProgress(fileSize, fileSize, startTime);
+	        updateOverallProgress(fileSize, fileSize);
 	        updateStatus("Download completed successfully!");
 	    } catch (InterruptedException | ExecutionException e) {
 	        updateStatus("Download failed: " + e.getMessage());
@@ -274,83 +267,92 @@ public class AdvancedDownloader {
 	}
 	
 	private void downloadSegment(String fileUrl, long startByte, long endByte, File outputFile, int segmentNumber,
-            AtomicLong totalBytesDownloaded, long fileSize, long startTime) throws IOException {
+	        AtomicLong totalBytesDownloaded, long fileSize) throws IOException {
+		// thiết lập kết nối http
 		URL url = new URL(fileUrl);
-		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-		connection.setRequestMethod("GET");
-		connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-		connection.setRequestProperty("Range", "bytes=" + startByte + "-" + endByte);
-		
-		try (InputStream in = connection.getInputStream(); 
-		RandomAccessFile raf = new RandomAccessFile(outputFile, "rw")) {
-			raf.seek(startByte);
-			byte[] buffer = new byte[8192];
-			int bytesRead;
-			long bytesDownloaded = 0;
-			long lastUpdateTime = System.currentTimeMillis();
-			long segmentStartTime = System.currentTimeMillis();
-			long lastBytesDownloaded = 0;
-			
-			while ((bytesRead = in.read(buffer)) != -1) {
-				// xử lí cancel
-	            if (cancelFlag) {
-	                return; 
+	    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+	    connection.setRequestMethod("GET");
+	    connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+	    connection.setRequestProperty("Range", "bytes=" + startByte + "-" + endByte);
+	    // Mở stream đọc và ghi
+	    RandomAccessFile raf = new RandomAccessFile(outputFile, "rw");
+	    InputStream in = connection.getInputStream();
+        raf.seek(startByte);
+        byte[] buffer = new byte[8192];
+        int bytesRead;
+        long bytesDownloaded = 0;
+        double lastUpdateTime = getCurrentTime();
+        long lastBytesDownloaded = 0;
+        double currentTime;
+		try { 		
+	        while ((bytesRead = in.read(buffer)) != -1) {
+	            // Kiểm tra interrupt 
+	            if (Thread.currentThread().isInterrupted()) {
+	                return;
 	            }
-	            
-				// Xử lý pause
-				lock.lock();
-				try {
-				 while (!this.runningFlag) {
-				     try {
-				         pauseCondition.await();
-				     } catch (InterruptedException e) {
-				         Thread.currentThread().interrupt();
-				         return;
-				     }
-				 }
-				} finally {
-				 lock.unlock();
-				}
-				
-				// Tải và cập nhật tiến trình
-				raf.write(buffer, 0, bytesRead);
-				bytesDownloaded += bytesRead;
-				totalBytesDownloaded.addAndGet(bytesRead);
-				
-				// Kiểm tra thời gian để cập nhật thông báo
-				long currentTime = System.currentTimeMillis();
-				
-				if (currentTime - lastUpdateTime >= 2000) {
-					 // Tính toán tốc độ tải
-					 long timeElapsed = currentTime - lastUpdateTime;
-					 long bytesDelta = bytesDownloaded - lastBytesDownloaded;
-					 double speedInBytesPerSecond = (bytesDelta * 1000.0) / timeElapsed;
-					 
-					 // Tính toán tiến trình phân đoạn
-					 double segmentProgress = (bytesDownloaded * 100.0) / (endByte - startByte + 1);
-					 double segmentElapsedTime = (currentTime - segmentStartTime) / 1000.0;
-					
-					 // Cập nhật thông báo
-					 updateSegmentProgress(
-					     segmentNumber,
-					     bytesDownloaded,
-					     endByte - startByte + 1,
-					     segmentProgress,
-					     speedInBytesPerSecond,
-					     segmentElapsedTime
-					 );
-					
-					 // Cập nhật thời gian và bytes cho lần tính toán tiếp theo
-					 lastUpdateTime = currentTime;
-					 lastBytesDownloaded = bytesDownloaded;
-				}
-			}
-			double finalSegmentElapsedTime = (System.currentTimeMillis() - segmentStartTime) / 1000.0;
-			updateSegmentProgress(segmentNumber,bytesDownloaded,endByte - startByte + 1,100,0,finalSegmentElapsedTime);
-		} catch (IOException e) {
-			updateStatus("Error in segment " + segmentNumber + ": " + e.getMessage());
-			throw e;
-			}
+	            // Xử lý pause
+	            lock.lock();
+	            try {
+	                while (!this.runningFlag) {
+	                    try {
+	                        pauseCondition.await();
+	                    } catch (InterruptedException e) {
+	                        Thread.currentThread().interrupt();
+	                        connection.disconnect();
+	                        return;
+	                    }
+	                }
+	            } finally {
+	                lock.unlock();
+	            }
+	            // Tải và cập nhật tiến trình
+	            raf.write(buffer, 0, bytesRead);
+	            bytesDownloaded += bytesRead;
+	            totalBytesDownloaded.addAndGet(bytesRead);
+	            // thông báo mỗi 2 giây
+	            currentTime = getCurrentTime();
+	            if (currentTime - lastUpdateTime >= 2000) {
+	                // Tính toán tốc độ tải
+	                double timeElapsed = currentTime - lastUpdateTime;
+	                long bytesDelta = bytesDownloaded - lastBytesDownloaded;
+	                double speedInBytesPerSecond = (bytesDelta * 1000.0) / timeElapsed;
+
+	                // Tính toán tiến trình phân đoạn
+	                double segmentProgress = (bytesDownloaded * 100.0) / (endByte - startByte + 1);
+	                // Cập nhật thông báo
+	                updateSegmentProgress(segmentNumber, bytesDownloaded, endByte - startByte + 1, segmentProgress, speedInBytesPerSecond);
+	                // Cập nhật thời gian và bytes cho lần tính toán tiếp theo
+	                lastUpdateTime = currentTime;
+	                lastBytesDownloaded = bytesDownloaded;
+	            }
+	        }
+	        updateSegmentProgress(segmentNumber, bytesDownloaded, endByte - startByte + 1, 100,0);
+	    } catch (IOException e) {
+	        updateStatus("Error in segment " + (segmentNumber+1) + ": " + e.getMessage());
+	        throw e;
+	    } finally {
+	        try {
+	            if (raf != null) {
+	                try {
+	                    raf.close();
+	                } catch (IOException e) {}
+	            }
+	        } finally {
+	            try {
+	                if (in != null) {
+	                    try {
+	                        in.close();
+	                    } catch (IOException e) {}
+	                }
+	            } finally {
+	                if (connection != null) {
+	                    try {
+	                        connection.disconnect();
+	                    } catch (Exception e) {}
+	                }
+	            }
+	        }
+	    }
 	}
 
 	private void performSingleThreadDownload(HttpURLConnection connection, File outputFile, AtomicLong totalBytesDownloaded) throws IOException {
@@ -451,17 +453,17 @@ public class AdvancedDownloader {
 		return df.format(fileSize) + " " + units[unitIndex];
 	}
 
-	private void updateOverallProgress(long totalBytesDownloaded, long fileSize, long startTime) {
+	private void updateOverallProgress(long totalBytesDownloaded, long fileSize) {
 		if (statusArea != null && progressBar != null) {
 			double progress = (double) totalBytesDownloaded / fileSize * 100;
-			long currentTime = System.currentTimeMillis();
-			double elapsedTime = (currentTime - startTime) / 1000.0;
-			double speed = totalBytesDownloaded / elapsedTime;
+			double nowTime = getCurrentTime();
+			double elapsedTime = nowTime - this.startTime - this.totalPauseTime;
+			double speed = totalBytesDownloaded / elapsedTime;    // milisecond
 			double estimatedTimeRemaining = (fileSize - totalBytesDownloaded) / speed;
-
-			String progressText = String.format("Overall Progress: %s / %s (%.2f%%) - Speed: %s/s - Elapsed: %.2f s - ETA: %.2f s\n\n",
+			speed *=1000; // tốc độ trên 1 giây
+			String progressText = String.format("Overall Progress: %s / %s (%.2f%%) - Speed: %s/s - Elapsed: %s - ETA: %s\n\n",
 					formatFileSize(totalBytesDownloaded), formatFileSize(fileSize), progress,
-					formatFileSize((long) speed), elapsedTime, estimatedTimeRemaining);
+					formatFileSize((long) speed), formatTime(elapsedTime), formatTime(estimatedTimeRemaining));
 			Platform.runLater(() -> {
 				progressBar.setProgress(progress / 100);
 				statusArea.appendText(progressText);
@@ -469,13 +471,13 @@ public class AdvancedDownloader {
 		}
 	}
 
-	private void updateSegmentProgress(int segmentNumber, long bytesDownloaded, long segmentSize,
-			double segmentProgress, double segmentSpeed, double segmentElapsedTime) {
+	private void updateSegmentProgress(int segmentNumber, long bytesDownloaded, 
+			long segmentSize,double segmentProgress, double segmentSpeed) {
 		if (statusArea != null) {
-			String progressText = String.format("Segment %d: %s / %s (%.2f%%) - Speed: %s/s - Time: %.2f s\n",
+			double nowTime = getCurrentTime();
+			String progressText = String.format("Segment %d: %s / %s (%.2f%%) - Speed: %s/s - Elapsed: %s\n",
 					segmentNumber+1, formatFileSize(bytesDownloaded), formatFileSize(segmentSize), segmentProgress,
-					formatFileSize((long) segmentSpeed), segmentElapsedTime);
-
+					formatFileSize((long) segmentSpeed), formatTime(nowTime-this.startTime-this.totalPauseTime));
 			Platform.runLater(() -> {
 				statusArea.appendText(progressText);
 			});
@@ -492,6 +494,27 @@ public class AdvancedDownloader {
 						peers));
 			});
 		}
+	}
+	
+	private double getCurrentTime() {
+		return System.currentTimeMillis();
+	}
+	
+	private static String formatTime(double milliseconds) {
+	    int seconds = (int) (milliseconds / 1000); 
+	    int hours = seconds / 3600;
+	    seconds %= 3600; 
+	    int minutes = seconds / 60;
+	    seconds %= 60; 
+	    StringBuilder timeString = new StringBuilder();
+	    if (hours > 0) {
+	        timeString.append(hours).append(" hours ");
+	    }
+	    if (minutes > 0) {
+	        timeString.append(minutes).append(" minutes ");
+	    }
+	    timeString.append(String.format("%d seconds", seconds));
+	    return timeString.toString().trim(); 
 	}
 
 	private void updateStatus(String message) {
