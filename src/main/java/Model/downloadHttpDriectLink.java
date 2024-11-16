@@ -12,13 +12,14 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class downloadHttpDriectLink extends abstractDownloadObject {
 	private static final int NUM_SEGMENTS = 4;
+
 	public downloadHttpDriectLink() {
 		this.progress = 0;
-		this.runningFlag = false;
 		this.startTime = 0;
-		this.executor = Executors.newFixedThreadPool(NUM_SEGMENTS + 1);
+		this.runningFlag = false;
 		this.lock = new ReentrantLock();
 		this.pauseCondition = lock.newCondition();
+		this.executor = Executors.newFixedThreadPool(NUM_SEGMENTS + 1);
 	}
 
 	public void start(String urlIput) {
@@ -47,7 +48,9 @@ public class downloadHttpDriectLink extends abstractDownloadObject {
 
 	public void cancel() {
 		try {
-			executor.shutdownNow();
+			this.runningFlag = false;
+			if (executor != null)
+				executor.shutdownNow();
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -114,111 +117,89 @@ public class downloadHttpDriectLink extends abstractDownloadObject {
 				}));
 			}
 
-			// Thêm luồng thông báo quá trình vào excutor
 			executor.submit(() -> monitorObserver(totalBytesDownloaded, fileSize));
-			// Hoàn tất xử lý các phân đoạn
 			completeDownload(futures, fileSize);
-		} else { // tải thông thường nếu không cho phép tải phân đoạn
+		} else {
+			// tải thông thường nếu không cho phép tải phân đoạn
 			performSingleThreadDownload(connection, outputFile, totalBytesDownloaded);
 		}
 	}
 
 	private void downloadSegment(String fileUrl, long startByte, long endByte, File outputFile, int segmentNumber,
 			AtomicLong totalBytesDownloaded) throws IOException {
-		// thiết lập kết nối http
-		URL url = new URL(fileUrl);
-		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-		connection.setRequestMethod("GET");
-		connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-		connection.setRequestProperty("Connection", "keep-alive");
-		connection.setRequestProperty("Range", "bytes=" + startByte + "-" + endByte);
-
-		// Mở stream đọc và ghi
-		RandomAccessFile raf = new RandomAccessFile(outputFile, "rw");
-		InputStream in = new BufferedInputStream(connection.getInputStream(), 100 * 1024 * 1024);
-		raf.seek(startByte);
-		byte[] buffer = new byte[100 * 1024 * 1024];
-		int bytesRead;
-		long bytesDownloaded = 0;
-		double lastUpdateTime = time.getCurrentTime();
-		long lastBytesDownloaded = 0;
-		double currentTime;
-		long elapsedTime = 0;
-		long start = System.nanoTime();
+		HttpURLConnection connection = null;
+		RandomAccessFile raf = null;
+		InputStream in = null;
 		try {
-			while ((bytesRead = in.read(buffer)) != -1) {
+			URL url = new URL(fileUrl);
+			long currentPosition = startByte;
+			raf = new RandomAccessFile(outputFile, "rw");
+			byte[] buffer = new byte[25600];
+			int bytesRead;
+			long bytesDownloaded = 0;
+			double currentTime;
+			double lastUpdateTime = time.getCurrentTime();
 
-				// Kiểm tra interrupt
+			while (currentPosition <= endByte) {
 				if (Thread.currentThread().isInterrupted()) {
 					return;
 				}
-				// Xử lý pause
 				lock.lock();
 				try {
 					while (!this.runningFlag) {
 						try {
+							if (connection != null) {
+								connection.disconnect();
+								connection = null;
+								if (in != null) {
+									in.close();
+									in = null;
+								}
+							}
 							pauseCondition.await();
 						} catch (InterruptedException e) {
-							Thread.currentThread().interrupt();
-							connection.disconnect();
-							return;
+							System.out.println(e);
 						}
 					}
 				} finally {
 					lock.unlock();
 				}
-				// Tải và cập nhật tiến trình
+
+				if (connection == null) {
+					connection = httpConection.createSegmentConnection(url, currentPosition, endByte);
+					in = connection.getInputStream();
+					raf.seek(currentPosition);
+				}
+
+				bytesRead = in.read(buffer);
+				if (bytesRead == -1)
+					break;
+
+				raf.write(buffer, 0, bytesRead);
 				bytesDownloaded += bytesRead;
+				currentPosition += bytesRead;
 				totalBytesDownloaded.addAndGet(bytesRead);
-				// thông báo mỗi 2 giây
+
 				currentTime = time.getCurrentTime();
 				if (currentTime - lastUpdateTime >= 1500) {
-					// Tính toán tốc độ tải
-					double timeElapsed = currentTime - lastUpdateTime;
-					long bytesDelta = bytesDownloaded - lastBytesDownloaded;
-					double speedInBytesPerSecond = (bytesDelta * 1000.0) / timeElapsed;
-
-					// Tính toán tiến trình phân đoạn
-					double segmentProgress = (bytesDownloaded * 100.0) / (endByte - startByte + 1);
-					// Cập nhật thông báo
-					updateSegmentProgress(segmentNumber, bytesDownloaded, endByte - startByte + 1, segmentProgress,
-							speedInBytesPerSecond);
-					// Cập nhật thời gian và bytes cho lần tính toán tiếp theo
+					updateSegmentProgress(segmentNumber, bytesDownloaded, startByte, endByte);
 					lastUpdateTime = currentTime;
-					lastBytesDownloaded = bytesDownloaded;
 				}
 			}
-			updateSegmentProgress(segmentNumber, bytesDownloaded, endByte - startByte + 1, 100, 0);
-			return;
-		} catch (IOException e) {
-			this.detailText = "Error in segment " + (segmentNumber + 1) + ": " + e.getMessage();
-			throw e;
+			updateSegmentProgress(segmentNumber, bytesDownloaded, startByte, endByte);
 		} finally {
-			try {
-				if (raf != null) {
-					try {
-						raf.close();
-					} catch (IOException e) {
-					}
-				}
-			} finally {
+			if (in != null)
 				try {
-					if (in != null) {
-						try {
-							in.close();
-						} catch (IOException e) {
-						}
-					}
-				} finally {
-					if (connection != null) {
-						try {
-							buffer = null;
-							connection.disconnect();
-						} catch (Exception e) {
-						}
-					}
+					in.close();
+				} catch (IOException e) {
 				}
-			}
+			if (raf != null)
+				try {
+					raf.close();
+				} catch (IOException e) {
+				}
+			if (connection != null)
+				connection.disconnect();
 		}
 	}
 
@@ -257,11 +238,9 @@ public class downloadHttpDriectLink extends abstractDownloadObject {
 			this.detailText = "Download completed successfully!";
 		} catch (InterruptedException | ExecutionException e) {
 			this.detailText = "Download failed: " + e.getMessage();
-			throw new IOException("Download failed", e);
 		} finally {
 			this.runningFlag = false;
-			executor.shutdownNow(); 
-			executor = null;
+			executor.shutdownNow();
 		}
 	}
 
@@ -283,14 +262,17 @@ public class downloadHttpDriectLink extends abstractDownloadObject {
 		}
 	}
 
-	public void updateSegmentProgress(int segmentNumber, long bytesDownloaded, long segmentSize, double segmentProgress,
-			double segmentSpeed) {
+	public void updateSegmentProgress(int segmentNumber, long bytesDownloaded, long startByte, long endByte) {
 		{
-			double nowTime = time.getCurrentTime();
+			double currentTime = time.getCurrentTime();
+			double timeElapsed = currentTime - this.startTime - this.totalPauseTime;
+			long segmentSize = endByte - startByte + 1;
+			double speedInBytesPerSecond = (bytesDownloaded * 1000.0) / timeElapsed;
+			double segmentProgress = (double) (bytesDownloaded * 100.0) / (segmentSize);
+
 			String detailText = String.format("Segment %d: %s / %s (%.2f%%) - Speed: %s/s - Elapsed: %s\n",
 					segmentNumber + 1, file.formatFileSize(bytesDownloaded), file.formatFileSize(segmentSize),
-					segmentProgress, file.formatFileSize((long) segmentSpeed),
-					time.formatTime(nowTime - this.startTime - this.totalPauseTime));
+					segmentProgress, file.formatFileSize((long) speedInBytesPerSecond), time.formatTime(timeElapsed));
 			this.detailText += detailText;
 		}
 	}

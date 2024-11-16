@@ -41,12 +41,12 @@ public class controllerDownload extends downloadObject {
 	}
 	
 	public void updateProgressUI() {
-		if (this.isStarted() && this.downloader.getRunningFlag())
+		if (this.downloaderNotNull() && this.downloader.getRunningFlag())
 			 {
 				VBox statusContainer = (VBox) this.urlRow.getChildren().get(3);
 				ProgressBar progressBar = (ProgressBar) statusContainer.getChildren().get(0);
 				progressBar.setProgress(this.downloader.getProgress());
-				setDetailText(this.downloader.getDetailText());
+				setDetailText(this.downloader.getDetailText() + this.downloader.getRunningFlag());
 			} 
 	}
 }

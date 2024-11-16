@@ -82,9 +82,7 @@ public class downloadTorrent extends abstractDownloadObject {
 		SharedTorrent torrent = SharedTorrent.fromFile(torrentFile, downloadDir);
 		torrent.setMaxUploadRate(TORRENT_UPLOAD_RATE_LIMIT);
 		torrent.setMaxDownloadRate(TORRENT_DOWNLOAD_RATE_LIMIT);
-
 		Client client = new Client(InetAddress.getLocalHost(), torrent);
-
 		AtomicLong lastDownloaded = new AtomicLong(0);
 
 		client.addObserver((o, arg) -> {

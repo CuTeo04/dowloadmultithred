@@ -7,7 +7,7 @@ public class downloadObject {
 	public downloadObject() {
 	}
 
-	public boolean isStarted() {
+	public boolean downloaderNotNull() {
 		if (downloader == null)
 			return false;
 		else
@@ -15,12 +15,10 @@ public class downloadObject {
 	}
 
 	public void start() {
-
 		if (urlInput.endsWith(".torrent"))
 			this.downloader = new downloadTorrent();
 		else
 			this.downloader = new downloadHttpDriectLink();
 		this.downloader.start(urlInput);
 	}
-
 }

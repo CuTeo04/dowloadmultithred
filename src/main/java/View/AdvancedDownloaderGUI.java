@@ -49,20 +49,18 @@ public class AdvancedDownloaderGUI extends Application {
 		primaryStage.setScene(scene);
 		primaryStage.show();
 
+		
 		//// note: cập nhật dữ liệu
 		Timeline progressUpdateTimeline;
 		progressUpdateTimeline = new Timeline(new KeyFrame(Duration.seconds(1.5), event -> {
 			downloads.forEach(info -> {
-				if (info.isStarted() && info.downloader.getRunningFlag()) {
-					info.updateProgressUI();
-				}
+				info.updateProgressUI();
 			});
 		}));
-
 		// Đặt timeline chạy vô hạn
 		progressUpdateTimeline.setCycleCount(Timeline.INDEFINITE);
 		progressUpdateTimeline.play();
-
+		
 		//// note: hủy tải trước khi đóng ứng dụng
 		primaryStage.setOnCloseRequest(event -> {
 			if (progressUpdateTimeline != null) {
@@ -140,7 +138,6 @@ public class AdvancedDownloaderGUI extends Application {
 		TextField urlField = new TextField();
 		urlField.setPromptText("Enter URL or file path here...");
 		urlField.getStyleClass().add("url-field");
-		urlField.setEditable(false);
 		urlField.setPrefWidth(400);
 		Button deleteButton = new Button("Delete");
 		deleteButton.getStyleClass().addAll("custom-button", "delete-button");
@@ -223,8 +220,7 @@ public class AdvancedDownloaderGUI extends Application {
 	}
 
 	////////////// note
-	private void deleteUrlRow(HBox urlRow) {
-		// Stop và xóa download khỏi danh sách quản lý
+	private void deleteUrlRow(HBox urlRow) { // hoặc xóa bằng checkbox
 		downloads.removeIf(info -> {
 			if (info.getUrlRow() == urlRow) {
 				info.downloader.cancel();
@@ -232,19 +228,16 @@ public class AdvancedDownloaderGUI extends Application {
 			}
 			return false;
 		});
-
-		// Xóa UI component
 		VBox parent = (VBox) urlRow.getParent();
 		parent.getChildren().remove(urlRow);
 		urlCount--;
 	}
 
 	//////////////// note
-
 	private void downloadSelected(VBox urlContainer) {
 		downloads.forEach(info -> {
 			HBox urlRow = info.getUrlRow();
-			if (!info.isStarted() && info.isSelectedChecbox()) {
+			if (!info.downloaderNotNull() && info.isSelectedChecbox()) {
 				new Thread(() -> {
 					try {
 						info.setInputCurrentUrlText();
@@ -261,9 +254,7 @@ public class AdvancedDownloaderGUI extends Application {
 
 	private void pauseSelected(VBox urlContainer) {
 		downloads.forEach(info -> {
-			HBox urlRow = info.getUrlRow();
-			CheckBox checkBox = (CheckBox) urlRow.getChildren().get(0);
-			if (info.isStarted() && checkBox.isSelected() && info.downloader.getRunningFlag()) {
+			if (info.downloaderNotNull() && info.isSelectedChecbox() && info.downloader.getRunningFlag()) {
 				info.setDetailText("Pause. . .");
 				info.downloader.pause();
 			}
@@ -273,9 +264,7 @@ public class AdvancedDownloaderGUI extends Application {
 	//////////////// note
 	private void resumeSelected(VBox urlContainer) {
 		downloads.forEach(info -> {
-			HBox urlRow = info.getUrlRow();
-			CheckBox checkBox = (CheckBox) urlRow.getChildren().get(0);
-			if (info.isStarted() && checkBox.isSelected() && !info.downloader.getRunningFlag()) {
+			if (info.downloaderNotNull() && info.isSelectedChecbox() && !info.downloader.getRunningFlag()) {
 				info.setDetailText("Resume. . . ");
 				info.downloader.resume();
 			}
@@ -285,7 +274,7 @@ public class AdvancedDownloaderGUI extends Application {
 	//////// note: hủy các file đang tải để tránh lỗi luồng
 	private void handleShutdown() {
 		downloads.forEach(info -> {
-			if (info.isStarted())
+			if (info.downloaderNotNull())
 				info.downloader.cancel();
 			System.exit(0);
 		});
